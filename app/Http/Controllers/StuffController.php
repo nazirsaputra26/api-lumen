@@ -11,15 +11,20 @@ class StuffController extends Controller
 {
     public function index()
     {
-        $stuff = Stuff::with('stuffstock')->get();
+        try {
+            // $stuff = Stuff::with('stuffstock')->get();
+            $data = Stuff::with('stuffstock')->get();
+    
+            // return ApiFormatter::sendResponse(200, true, 'Lihat semua barang', $stuff);
+            return ApiFormatter::sendResponse(200, true, 'success', $data);
+        } catch (\Exception $err) {
+            return ApiFormatter::sendResponse(400, false, 'bad request', $err->getMessage());
+        }
+    }
 
-        return ApiFormatter::sendResponse(200, true, 'Lihat semua barang', $stuff);
-
-        // return response()->json([
-        //     'success' => true,
-        //     'message' => 'Lihat semua barang',
-        //     'data' => $stuff
-        // ], 200);
+    public function __construct()
+    {
+        $this->middleware('auth:api');
     }
 
     public function store(Request $request)
@@ -68,11 +73,9 @@ class StuffController extends Controller
             return ApiFormatter::sendResponse(201, true, 'Barang Berhasil Disimpan!', $stuff);
         } catch (\Throwable $th) {
             // throw $th;
-            if ($th->validator->errors()) {
-                return ApiFormatter::sendResponse(400, false, 'Terdapat Kesalahan Input Silahkan Coba Lagi!', $th->validator->errors());
-            } else {
+      
                 return ApiFormatter::sendResponse(400, false, 'Terdapat Kesalahan Input Silahkan Coba Lagi!', $th->getMessage());
-            }
+           
         }
 
     }
@@ -174,6 +177,17 @@ class StuffController extends Controller
 
         try {
             $stuff = Stuff::findOrFail($id);
+
+            if ($stuff->inboundStuffs()->exists() || $stuff->stuffStock()->exists() || $stuff->lendings()->exists()) {
+              
+                $relatedData = [
+                    'inbound' => $stuff->inboundStuffs()->exists() ? $stuff->inboundStuffs->toArray() : null,
+                    'stuffStock' => $stuff->stuffStock()->exists() ? $stuff->stuffStock->toArray() : null,
+                    'lending' => $stuff->lendings()->exists() ? $stuff->lendings->toArray() : null,
+                ];
+
+                return ApiFormatter::sendResponse(400, false, "Tidak dapat menghapus Stuff dengan id $id karena memiliki data ", $relatedData);     
+            }
 
             $stuff->delete();
 

@@ -1,16 +1,26 @@
 <?php
 
+
 namespace App\Http\Controllers;
+
 
 use App\Models\User;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
+use App\Helpers\ApiFormatter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 
+
 class AuthController extends Controller
 {
-    public function authenticate(Request $request)
+    public function __construct()
+    {
+        $this->middleware('auth:api', ['except' => 'login']);
+    }
+
+
+    public function login(Request $request)
     {
         $this->validate($request, [
             'email' => 'required',
@@ -18,48 +28,37 @@ class AuthController extends Controller
         ]);
 
 
-        $user = User::where('email', $request->input('email'))->first();
+        $credentials = $request->only(['email', 'password']);
 
 
-        if (Hash::check($request->input('password'), $user->password)) {
-            $apikey = base64_encode(Str::random(40));
-
-
-            $user->update([
-                'api_key' => $apikey
-            ]);
-
-
-            return response()->json([
-                'success' => true,
-                'api_key' => $apikey
-            ]);
-        } else {
-            return response()->json([
-                'success' => false
-            ], 401);
+        if (! $token = Auth::attempt($credentials)) {
+            return ApiFormatter::sendResponse(400, false, 'User not found', 'Silakan cek kembali email dan password anda!');
         }
+
+
+        $respondWithToken = [
+            'access_token' => $token,
+            'token_type' => 'bearer',
+            'user' => auth()->user(),
+            'expires_in' => auth()->factory()->getTTL() * 60 * 24
+        ];
+
+
+        return ApiFormatter::sendResponse(200, true, 'Logged In', $respondWithToken);
     }
 
 
-    public function logout(Request $request)
+    public function me()
     {
-        if ($request->header('api_key')) {
-            $user = User::where('api_key', $request->input('api_key'));
-            $user->update([
-                'api_key' => NULL
-            ]);
-
-
-            return response()->json([
-                'success' => true,
-                'message' => "Berhasil Logout!"
-            ], 200);
-        } else {
-            return response()->json([
-                'success' => false,
-            ], 400);
-        }
+        return ApiFormatter::sendResponse(200, true, 'success', auth()->user());
     }
 
+
+    public function logout()
+    {
+        auth()->logout();
+
+
+        return ApiFormatter::sendResponse(200, true, 'success', 'Berhasil logout!');
+    }
 }

@@ -2,70 +2,113 @@
 
 namespace App\Http\Controllers;
 
-use App\Helpers\ApiFormatter;
-use App\models\InboundStuff;
-use App\models\Stuff;
-use Illuminate\Support\Facades\Validator;
+use App\Models\Stuff;
+use App\Models\StuffStock;
+use App\Models\InboundStuff;
 use Illuminate\Http\Request;
-use App\models\StuffStock;
+use App\Helpers\ApiFormatter;
+use Laravel\Lumen\Routing\Controller;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\File;
+
+
 
 class InboundStuffController extends Controller
 {
-    public function index(){
-        // $inboundStuff = InboundStuff::all();
+    public function index()
+    {
+        $iStuff = InboundStuff::with('stuff.stuffstock')->get();
 
-        // return response()->json([
-        //     'success' => true,
-        //     'message' => 'Lihat semua barang',
-        //     'data' => $inboundStuff
-        // ],200);
-        $inboundStock = InboundStuff::with('stuff','stuffStock')->get();
+        return ApiFormatter::sendResponse(200,true,'Lihat semua barang', $iStuff);
+    // $stuff = InboundStuff::all();
+    // $stuffstock = StuffStock::all();
+    // $inboundstuff = InboundStuff::all();
 
-        return ApiFormatter::sendResponse(200, true, 'Lihat Semua stock Barang', $inboundStock);
-    
+    // if ($iStuff->isEmpty()) {
+    //     return ApiFormatter::sendResponse(404,false,'Data tidak ditemukan', $iStuff);
+    // }
+
+    // return response()->json([
+    //     'success' => true,
+    //     'message' => 'Lihat semua stock barang',
+    //     'data' => [
+    //         'barang' => $stuff,
+    //         'stock barang' => $stuffstock,
+    //         'barang masuk' => $inboundstuff
+    //     ]
+    // ], 200);
+    }
+
+    public function __construct()
+    {
+        $this->middleware('auth:api');
     }
 
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'stuff_id' => 'required',
+            'stuff_id'   => 'required|integer',
             'total' => 'required',
             'date' => 'required',
-            'proff_file' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048', // Adjust file validation as needed
+            'proff_file' => 'required|file',
         ]);
-
+            
         if ($validator->fails()) {
-            return ApiFormatter::sendResponse(400, false, 'semua kolom wajib diisi!', $validator->errors());
+            return ApiFormatter::sendResponse(400, false, 'Semua Kolom Wajib Diisi!', $validator->errors());
         } else {
             $file = $request->file('proff_file');
-            $filename = $request->input('stuff_id') . '_' . strtotime($request->input('date')) . strtotime(date('H:i')) . '_' . $file->getClientOriginalExtension();
-            $file->move(app()->basePath('public/uploads'), $filename);
-
+            $fileName = $request->input('stuff_id') . '_' . strtotime($request->input('date')) . strtotime(date('H:i')) . '.' . $file->getClientOriginalExtension();
+            $file->move('uploads', $fileName); //4
+    
             $inbound = InboundStuff::create([
-                'stuff_id' => $request->input('stuff_id'),
-                'total' => $request->input('total'),
-                'date' => $request->input('date'),
-                'proff_file' => $filename,
+                'stuff_id'     => $request->input('stuff_id'),
+                'total'   => $request->input('total'),
+                'date'   => $request->input('date'),
+                'proff_file'   => $fileName,
             ]);
-
+    
             $stock = StuffStock::where('stuff_id', $request->input('stuff_id'))->first();
-
-            $total_stock = (int)$stock->total_available + (int)$request->input('total');
-
-            $stock->update([
-                'total_available' => (int)$total_stock
-            ]);
-
-            if ($inbound && $stock) {
-                return ApiFormatter::sendResponse(201, true, 'Barang Masuk Berhasil Dismpan!');
+    
+            if ($stock) {
+                $total_stock = (int)$stock->total_available + (int)$request->input('total');
+                $stock->update([
+                    'total_available' => (int)$total_stock
+                ]);
+    
+                return ApiFormatter::sendResponse(201, true, 'Barang Masuk Berhasil Disimpan!');
             } else {
-                return ApiFormatter::sendResponse(404, false, 'Barang Masuk gagal didimpan!');
+                return ApiFormatter::sendResponse(404, false, 'Stok tidak ditemukan untuk stuff_id yang ditemukan.');
             }
         }
-        
+        // try {
+        //     $this->validate([
+        //         'stuff_id' => 'required',
+        //         'total' => 'required',
+        //         'date' => 'required',
+        //         'proff_file' => 'required',
+        //     ]);
+
+        //     if ($validator->fails()) {
+        //         return ApiFormatter::sendResponse(400, false, 'Semua Kolom Wajib Diisi!', $validator->erros());
+        //     } else {
+        //         $file = $request->file('proff_file');
+        //         $fileName = $request->input('stuff_id') . '_' . strtotime($request->input('date')) . strtotime(date('H:i')) . '.' . $file->getClientOriginalExtension();
+        //         $file->move('proff', $fileName);
+        //     }
+
+        //     $inbound = InboundStuff::create([
+        //         'stuff_id' => $request->input('stuff_id'),
+        //         'total' => $request->input('total'),
+        //         'date' => $request->input('date'),
+        //         'proff_file' => $fileName,
+        //     ]);
+
+        //     $stock = StuffStock::where('stuff_id', $request->input('stuff_id'))->first();
+        // }
     }
-    public function show($id){
+
+    public function show($id)
+    {
         try {
             $inbound = InboundStuff::with('stuff', 'stuff.stock')->findOrFail($id);
 
@@ -75,213 +118,179 @@ class InboundStuffController extends Controller
         }
     }
 
-    public function update(Request $request, $id){
-        try{
-            // with('stuff', 'stuff.stock')->
-            $inbound = inboundStuff::with('stuff', 'stuff.stock')->findOrFail($id);
-            $stuff_id = ($request->stuff_id) ? $request->stuff_id : $inbound->stuff_id;
-            $total = ($request->total)? $request->total : $inbound->total;
-            $date = ($request->date)? $request->date : $inbound->date;
-            // $proff_file = ($request->proff_file)? $request->proff_file : $inboundStuff->proff_file;
 
-            if ($request->file('proff_file') !== NULL) {
-                $file = $request->file('proff_file');
-                $filename = $stuff_id . '_' . strtotime($date) . strtotime(date('H:i')) . '.' .
-                $file->getClientOriginalExtension();
-                $file->move('proff', $filename);
-            } else {
-                $filename = $inbound->proff_file;
-            }
+        public function update(Request $request, $id)
+        {
+            try {
+                $inbound = InboundStuff::with('stuff', 'stuff.stock')->findOrFail($id);
 
-            $total_s = $total - $inbound->total;
 
-            $total_stock = (int)$inbound->stuff->stock->total_available + $total_s;
+                $stuff_id = ($request->stuff_id) ? $request->stuff_id : $inbound->stuff_id;
+                $total = ($request->total) ? $request->total : $inbound->total;
+                $date = ($request->date) ? $request->date : $inbound->date;
 
-            $inbound->stuff->stock->update([
-                'total_available' => (int)$total_stock,
-            ]);
 
-            if ($inbound) {
-                $inbound->update([
-                    'stuff_id' => $stuff_id,
-                    'total' => $total,
-                    'date' => $date,
-                    'proff_file' => $filename
+                if ($request->file('proff_file') !== NULL) {
+                    $file = $request->file('proff_file');
+                    $fileName = $stuff_id . '_' . strtotime($date) . strtotime(date('H:i')) . '.' . $file->getClientOriginalExtension();
+                    $file->move('public/uploads', $fileName); //3
+                } else {
+                    $fileName = $inbound->proff_file;
+                }
+                $total_s = $total - $inbound->total;
+                $total_stock = (int)$inbound->stuff->stock->total_available + $total_s;
+                $inbound->stuff->stock->update([
+                    'total_available' => (int)$total_stock
                 ]);
-                return ApiFormatter::sendResponse(200, true, "Berhasil ubah data barang masuk dengan id $id", $inbound);
-            } else {
-                return ApiFormatter::sendResponse(400, false, "Proses gagal!");
+                if ($inbound) {
+                    $inbound->update([
+                        'stuff_id' => $stuff_id,
+                        'total' => $total,
+                        'date' => $date,
+                        'proff_file' => $fileName
+                    ]);
+                    return ApiFormatter::sendResponse(200, true, "Berhasil Ubah Data Barang Masuk dengan id $id", $inbound);
+                } else {
+                    return ApiFormatter::sendResponse(400, false, "Proses gagal!");
+                }
+            } catch (\Throwable $th) {
+                return ApiFormatter::sendResponse(400, false, "Proses Gagal!", $th->getMessage());
             }
-        } catch (\Throwable $th) {
-            return ApiFormatter::sendResponse(400, false, "Proses gagal!", $th->getMessage());
         }
-    }
 
-    public function destroy($id){
-        try{
-            $inbound =  inboundStuff::findOrFail($id);
-            $stock = StuffStock::where('stuff_id', $inbound->stuff_id)->first();
-    
-            $available_min = $stock->total_available - $inbound->total;
-            $available = ($available_min < 0) ? 0 : $available_min;
-            $defec = ($available_min < 0) ? $stock->total_defect + ($available * -1) : $stock->total_defec;
-            $stock->update([
-                'total_available' => $available,
-                'total_defect' => $defec,
-            ]);
-            $inbound->delete();
-    
-            return ApiFormatter::sendResponse(200, true, "Berhasil Hapus data dengen id $id", ['id' => $id]);
-        } catch(\Throwable $th){
-            return ApiFormatter::sendResponse(400, false, "Proses gagal!", $th->getMessage());
+        public function deleted()
+        {
+            try {
+                $stuff = InboundStuff::onlyTrashed()->get();
+                //jika tidak ada data yang dihapus
+                if ($stuff->count() === 0) {
+                    return ApiFormatter::sendResponse(200, true, "Tidak ada data yang dihapus");
+                }
+                //menampilkan data-data yang dihapus
+                return ApiFormatter::sendResponse(200, true, "Lihat Data Barang yang dihapus", $stuff);
+            } catch (\Throwable $th) {
+                return ApiFormatter::sendResponse(404, false, "Proses gagal! silahkan coba lagi!", $th->getMessage());
+            }
         }
-    }
-    
-    public function deleted()
-    {
-        try {
 
-            $inbound = InboundStuff::onlyTrashed()->get();
-    
-            return ApiFormatter::sendResponse(200, true, "Lihat Data Pengemblian yang dihapus", $inbound);
-        } catch (\Throwable $th) {
-            return ApiFormatter::sendResponse(404, false, "Proses gagal! silahkan coba lagi!", $th->getMessage());
+        public function restore($id)
+        {
+            try {
+                $stuff = InboundStuff::onlyTrashed()->where('id', $id);
+
+                $stuff->restore();
+                //jika tidak ada data yang dihapus
+                // if ($stuff->count() === 0) {
+                //     return ApiFormatter::sendResponse(200, true, "Tidak ada data yang dihapus");
+                // }
+                //mengembalikan data-data yang dihapus
+                return ApiFormatter::sendResponse(200, true, "Berhasil Mengembalikan data yang telah dihapus!", ['id' => $id]);
+            } catch (\Throwable $th) {
+                return ApiFormatter::sendResponse(404, false, "Proses gagal! silahkan coba lagi!", $th->getMessage());
+            }
         }
-    } 
 
-    public function restore($id)
-    {
-        try {
-            $inbound = InboundStuff::onlyTrashed()->where('id', $id);
+        public function restoreAll()
+        {
+            try{
+                $stuffs = InboundStuff::onlyTrashed();
 
-            $stock = StuffStock::where('stuff_id', $inbound->stuff_id)->first();
-
-            $available = $stock->total_available + $inbound->total;
-            $available_min = $inbound->total - $stock->total_available;
-            $defect = ($available_min < 0) ? $stock->total_defect + ($available_min * -1) : $stock->total_defect;
-
-            $stock->update([
-                'total_available' => $available,
-                'total_defect' => $defect
-            ]);
-
-            $inbound->restore();
-
-            return ApiFormatter::sendResponse(200, true, "Berhasil mengembalikan data yang telah dihapus!", ['id' => $id]);
-        } catch (\Throwable $th) {
-            return ApiFormatter::sendResponse(404, false, "Proses gagal! silahkan coba lagi!", $th->getMessage());
+                $stuffs->restore();
+        
+                // if ($stuffs->count() === 0) {
+                //     return ApiFormatter::sendResponse(200, true, "Tidak ada data yang dihapus");
+                // }
+        
+                return ApiFormatter::sendResponse(200, true, "Berhasil mengembalikan barang yang telah dihapus");
+            }
+            catch(\Throwable $th)
+            {
+                return ApiFormatter::sendResponse(404, false, "Proses gagal! silakan coba lagi", $th->getMessage());
+            }
         }
-    }
 
-    public function restoreAll()
-    {
-        try {
-            $inbound = InboundStuff::onlyTrashed();
-
-            foreach ($inbound->get() as $inbound) {
+        public function permanentDelete($id)
+        {
+            try {
+                $inbound = InboundStuff::onlyTrashed()->findOrFail($id);
+        
+                $filePath = app()->basePath('public/uploads/' . $inbound->proff_file); //2
+                if (File::exists($filePath)) {
+                    File::delete($filePath);
+                }
+        
                 $stock = StuffStock::where('stuff_id', $inbound->stuff_id)->first();
-
-                $available = $stock->total_available + $inbound->total;
-                $available_min = $inbound->total - $stock->total_available;
-                $defect = ($available_min < 0) ? $stock->total_defect + ($available_min * -1) : $stock->total_defect;
-
+        
+                $available = $stock->total_available - $inbound->total;
+                $defect = ($available < 0) ? $stock->total_defect + ($available * -1) : $stock->total_defect;
+        
                 $stock->update([
                     'total_available' => $available,
                     'total_defect' => $defect
                 ]);
+        
+                $inbound->forceDelete();
+        
+                return ApiFormatter::sendResponse(200, true, "Berhasil hapus permanen data yang telah dihapus!", ['id' => $id]);
+            } catch (\Throwable $th) {
+                return ApiFormatter::sendResponse(404, false, "Proses gagal! Silakan coba lagi!", $th->getMessage());
             }
-
-            $inbound->restore();
-
-            return ApiFormatter::sendResponse(200, true, "Berhasil mengembalikan semua data yang telah dihapus!");
-        } catch (\Throwable $th) {
-            return ApiFormatter::sendResponse(404, false, "Proses gagal! silahkan coba lagi!", $th->getMessage());
         }
-    }
-
-    // public function permanentDelete($id)
-    // {
-    //     try {
-    //         $inbound = InboundStuff::onlyTrashed()->when('id', $id)->forceDelete();
-
-    //         $inbound->delete();
-
-    //         return ApiFormatter::sendResponse(200, true, "Berhasil hapus permanent semua data yang telah dihapus");
-    //     } catch (\Throwable $th) {
-    //         return ApiFormatter::sendResponse(404, false, "Proses gagal! silahkan coba lagi!", $th->getMessage());
-    //     }
-    // }
-
-    // public function permanentDeleteAll()
-    // {
-    //     try {
-    //         $inbound = InboundStuff::onlyTrashed();
-    
-    //         $inbound->delete();
-
-    //         return ApiFormatter::sendResponse(200, true, "Berhasil hapus permanent semua data yang telah dihapus");
-    //     } catch (\Throwable $th) {
-    //         return ApiFormatter::sendResponse(404, false, "Proses gagal! silahkan coba lagi!", $th->getMessage());
-    //     }
-    // } 
-    
-    public function permanentDelete($id)
-    {
-        try {
-            $inbound = InboundStuff::onlyTrashed()->findOrFail($id);
-    
-            $filePath = app()->basePath('public/proff/' . $inbound->proff_file);
-            if (File::exists($filePath)) {
-                File::delete($filePath);
+        
+        public function permanentDeleteAll()
+        {
+            try {
+                $inbounds = InboundStuff::onlyTrashed()->get();
+        
+                foreach ($inbounds as $inbound) {
+                    $filePath = app()->basePath('public/uploads/' . $inbound->proff_file); //1
+                    if (File::exists($filePath)) {
+                        File::delete($filePath);
+                    }
+        
+                    $stock = StuffStock::where('stuff_id', $inbound->stuff_id)->first();
+        
+                    if ($stock) {
+                        $available = $stock->total_available - $inbound->total;
+                        $defect = ($available < 0) ? $stock->total_defect + ($available * -1) : $stock->total_defect;
+        
+                        $stock->update([
+                            'total_available' => $available,
+                            'total_defect' => $defect
+                        ]);
+                    }
+        
+                    $inbound->forceDelete();
+                }
+        
+                return ApiFormatter::sendResponse(200, true, "Berhasil hapus permanen semua data yang telah dihapus!");
+            } catch (\Throwable $th) {
+                return ApiFormatter::sendResponse(500, false, "Proses gagal! Silakan coba lagi.", $th->getMessage());
             }
-    
-            $stock = StuffStock::where('stuff_id', $inbound->stuff_id)->first();
-    
-            $available = $stock->total_available - $inbound->total;
-            $defect = ($available < 0) ? $stock->total_defect + ($available * -1) : $stock->total_defect;
-    
+        }
+    public function destroy($id)
+    {
+        try{
+            $stuff = InboundStuff::findOrFail($id);
+            $stock=StuffStock::where('stuff_id', $stuff->stuff_id)->first();
+
+            $available_min =$stock->total_available - $stuff->total;
+            $available = ($available_min < 0) ? 0 : $available_min;
+            $defec =($available_min < 0) ? $stock ->total_defec + ($available * 1) : $stock->total_defec;
             $stock->update([
                 'total_available' => $available,
-                'total_defect' => $defect
+                'total_defec' => $defec
             ]);
+
+            $stuff->delete();
     
-            $inbound->forceDelete();
+            return ApiFormatter::sendResponse(200, true, "Berhasil menghapus data dengan id $id",['id' => $id]);
+
     
-            return ApiFormatter::sendResponse(200, true, "Berhasil hapus permanen data yang telah dihapus!", ['id' => $id]);
-        } catch (\Throwable $th) {
-            return ApiFormatter::sendResponse(404, false, "Proses gagal! Silakan coba lagi!", $th->getMessage());
-        }     
-    }
-        
-    public function permanentDeleteAll()
+        }        
+    catch(\Throwable $th)
     {
-        try {
-            $inbounds = InboundStuff::onlyTrashed()->get();
-    
-            foreach ($inbounds as $inbound) {
-                $filePath = app()->basePath('public/proff/' . $inbound->proff_file);
-                if (File::exists($filePath)) {
-                    File::delete($filePath);
-                }
-    
-                $stock = StuffStock::where('stuff_id', $inbound->stuff_id)->first();
-    
-                if ($stock) {
-                    $available = $stock->total_available - $inbound->total;
-                    $defect = ($available < 0) ? $stock->total_defect + ($available * -1) : $stock->total_defect;
-    
-                    $stock->update([
-                        'total_available' => $available,
-                        'total_defect' => $defect
-                    ]);
-                }
-    
-                $inbound->forceDelete();
-            }
-    
-            return ApiFormatter::sendResponse(200, true, "Berhasil hapus permanen semua data yang telah dihapus!");
-        } catch (\Throwable $th) {
-            return ApiFormatter::sendResponse(500, false, "Proses gagal! Silakan coba lagi.", $th->getMessage());
-        }      
+        return ApiFormatter::sendResponse(404, false, "Proses gagal! silakan coba lagi", $th->getMessage());
+    }
     }
 }

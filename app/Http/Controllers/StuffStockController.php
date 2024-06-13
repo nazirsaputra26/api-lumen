@@ -19,17 +19,11 @@ class StuffStockController extends Controller
         $data = ['barang' => $stuff, 'stock' => $stock];
 
         return ApiFormatter::sendResponse(200, true, 'Lihat semua stock', $stuffStock);
-        // $stuffStock = StuffStock::all();
-        // $stuff = Stuff::all();
+    }
 
-        // return response()->json([
-        //     'success' => true,
-        //     'message' => 'Lihat semua stok barang',
-        //     'data' => [
-        //         'barang' => $stuff,
-        //         'stock barang' => $stuffStock
-        //     ]
-        // ]);
+    public function __construct()
+    {
+        $this->middleware('auth:api');
     }
 
     public function store(Request $request)

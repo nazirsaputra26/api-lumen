@@ -6,7 +6,6 @@ use App\Models\Lending;
 use App\Models\Restoration;
 use App\Helpers\ApiFormatter;
 use App\Models\User;
-// use App\Http\Controllers\bcrypt;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -25,6 +24,11 @@ class UserController extends Controller
         //     'message' => 'Lihat semua barang',
         //     'data' => $stuff
         // ], 200);
+    }
+
+    public function __construct()
+    {
+        $this->middleware('auth:api');
     }
 
     public function store(Request $request)
@@ -71,7 +75,7 @@ class UserController extends Controller
                 'username' => $request->input('username'),
                 'email' => $request->input('email'),
                 // 'password' => Hash($request->input('password')),
-                'password' => $request->has('password'),
+                'password' => $request->Hash::make($request->input('password')),
                 'role' => $request->input('role'),
                 // $user->password = bcrypt($request->input('password'));
             ]);
@@ -84,6 +88,7 @@ class UserController extends Controller
             } else {
                 return ApiFormatter::sendResponse(400, false, 'Terdapat Kesalahan Input Silahkan Coba Lagi!', $th->getMessage());
             }
+            // return ApiFormatter::sendResponse(400, false, 'Terdapat Kesalahan Input silahkan coba lagi!', $th->getMessage());
         }
 
     }

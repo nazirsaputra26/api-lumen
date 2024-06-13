@@ -15,8 +15,8 @@ class InboundStuff extends Model
         return $this->belongsTo(stuff::class);
     }
 
-    public function stuffStock()
-    {
-        return $this->belongsTo(stuffStock::class);
-    }
+    // public function stuffStock()
+    // {
+    //     return $this->belongsTo(stuffStock::class);
+    // }
 }

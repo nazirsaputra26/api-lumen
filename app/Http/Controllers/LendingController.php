@@ -10,15 +10,24 @@ use App\Models\User;
 use App\Models\Stuff;
 use App\Models\Restoration;
 use App\Models\Lending;
-
+use App\Models\StuffStock;
 
 class LendingController extends Controller
 {
     public function index()
     {
-        $lending = Lending::with('stuff', 'restoration',)->get();
+        try {
+            $data = Lending::with('stuff', 'user', 'restoration')->get();
 
-        return ApiFormatter::sendResponse(200, true, 'Lihat Semua peminjaman', $lending);
+            return ApiFormatter::sendResponse(200, true, 'success', $data);
+        } catch (\Exception $err) {
+            return ApiFormatter::sendResponse(400, false, 'bad request', $err->getMessage());
+        }
+    }
+
+    public function __construct()
+    {
+        $this->middleware('auth:api');
     }
 
     // stuff_id", "date_time", "name", "user_id", "notes", "total_stuff
@@ -30,36 +39,55 @@ class LendingController extends Controller
                 'stuff_id' => 'required',
                 'date_time' => 'required',
                 'name' => 'required',
-                'user_id' => 'required',
-                'notes' => 'required',
+                // 'user_id' => 'required',
+                // 'notes' => 'required',
                 'total_stuff' => 'required',
             ]);
-            $lending = Lending::create([
-                'stuff_id' => $request->input('stuff_id'),
-                'date_time' => $request->input('date_time'),
-                'name' => $request->input('name'),
-                'user_id' => $request->input('user_id'),
-                'notes' => $request->input('notes'),
-                'total_stuff' => $request->input('total_stuff'),
-            ]);
-            return ApiFormatter::sendResponse(200, true, 'Barang Berhasil Dipinjam!', $lending);
-        } catch (\Throwable $th) {
-            if ($th->validator->errors()) {
-                return ApiFormatter::sendResponse(400, false, 'Terdapat Kesalahan Input Silahkan Coba Lagi!', $th->validator->errors());
+
+            $totalAvailable = StuffStock::where('stuff_id', $request->stuff_id)->value('total_available');
+
+            if (is_null($totalAvailable)) {
+                return ApiFormatter::sendResponse(400, 'bad request', 'Belum ada data inbound!');
+            } elseif ((int)$request->total_stuff > (int)$totalAvailable) {
+                return ApiFormatter::sendResponse(400, 'bad request', 'Stok tidak tersedian!');
             } else {
-                return ApiFormatter::sendResponse(400, false, 'Terdapat Kesalahan Input Silahkan Coba Lagi!', $th->getMessage());
+                $lending = Lending::create([
+                    'stuff_id' => $request->stuff_id,
+                    'date_time' => $request->date_time,
+                    'name' => $request->name,
+                    'notes' => $request->notes ? $request->notes : '-',
+                    'total_stuff' => $request->total_stuff,
+                    'user_id' => auth()->user()->id,
+                ]);
+
+                $totalAvailableNow = (int)$totalAvailable - (int)$request->total_stuff;
+                $stuffStock = StuffStock::where('stuff_id', $request->stuff_id)->update(['total_available' => $totalAvailableNow]);
+
+                $dataLending = Lending::where('id', $lending['id'])->with('user', 'stuff', 'stuff.stuffStock')->first();
+
+                return ApiFormatter::sendResponse(200, 'success', $dataLending);
             }
+        } catch (\Exception $err) {
+            return ApiFormatter::sendResponse(400, 'bad request', $err->getMessage());
         }
     }
 
     public function show($id)
     {
-        try {
-            $lending = Lending::with('stuff', 'restorations')->findOrFail($id);
+        // try {
+        //     $lending = Lending::with('stuff', 'restorations')->findOrFail($id);
 
-            return ApiFormatter::sendResponse(200, true, "Lihat Barang Peminjaman dengan id $id", $lending);
-        } catch (\Throwable $th) {
-            return ApiFormatter::sendResponse(404, false, "Data dengan id $id tidak ditemukan");
+        //     return ApiFormatter::sendResponse(200, true, "Lihat Barang Peminjaman dengan id $id", $lending);
+        // } catch (\Throwable $th) {
+        //     return ApiFormatter::sendResponse(404, false, "Data dengan id $id tidak ditemukan");
+        // }
+
+        try {
+            $data = Lending::where('id', $id)->with('user', 'restoration', 'restoration.user', 'stuff', 'stuff.stuffStock')->first();
+
+            return ApiFormatter::sendResponse(200, 'success', $data);
+        } catch (\Exception $err) {
+            return ApiFormatter::sendResponse(400, 'bad request', $err->getMessage());
         }
     }
 
@@ -92,15 +120,37 @@ class LendingController extends Controller
     public function destroy($id)
     {
         try {
-            $lending = Lending::findOrFail($id);
+            // Periksa apakah peminjaman memiliki restorasi
+            $hasRestoration = Lending::where('id', $id)->whereHas('restoration')->exists();
 
-            $lending->delete();
+            if ($hasRestoration) {
+                return ApiFormatter::sendResponse(400, 'bad request', 'Peminjaman sudah memiliki pengembalian, tidak dapat dibatalkan.');
+            }
 
-            return ApiFormatter::sendResponse(200, true, "Berhasil Hapus Data Peminjaman Barang dengan id $id", ['id' => $id]);
-        } catch (\Throwable $th) {
-            return ApiFormatter::sendResponse(404, false, "Proses Gagal! silahkan coba lagi!", $th->getMessage());
+            // Ambil data peminjaman sebelum dihapus
+            $lending = Lending::find($id);
+            $totalStuff = $lending->total_stuff;
+            $stuffId = $lending->stuff_id;
+
+            // Hapus peminjaman
+            //$checkproses = $lending->delete();
+
+            // if ($checkproses) {
+                // Kembalikan total_stuff ke total_available pada stuff_stock
+                $stuffStock = StuffStock::where('stuff_id', $stuffId)->first();
+                if ($stuffStock) {
+                    $stuffStock->total_avaliable += $totalStuff;
+                    $stuffStock->save();
+                    $checkproses = $lending->delete();
+                }
+
+                return ApiFormatter::sendResponse(200, 'success', 'Berhasil hapus data Peminjaman.');
+            // }
+        } catch (\Exception $err) {
+            return ApiFormatter::sendResponse(400, 'bad request', $err->getMessage());
         }
     }
+
 
     public function deleted()
     {
@@ -142,7 +192,8 @@ class LendingController extends Controller
     public function permanentDelete($id) 
     {
         try {
-            $lending = Lending::onlyTrashed()->when('id', $id)->forceDelete();
+            $lending = Lending::onlyTrashed()->where('id', $id)->forceDelete();
+            
 
             return ApiFormatter::sendResponse(200, true, "Berhasil hapus permanent data yang telah dihapus!", ['id' => $id]);
         } catch (\Throwable $th) {
